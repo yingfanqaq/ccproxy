@@ -120,6 +120,20 @@ class GeminiTokenManager(BaseTokenManager[GeminiOAuthCredentials]):
             )
             response.raise_for_status()
             payload = response.json()
+        except httpx.HTTPStatusError as exc:
+            response_text = ""
+            try:
+                response_text = exc.response.text[:500]
+            except Exception:
+                response_text = ""
+            logger.error(
+                "gemini_token_refresh_failed",
+                error=str(exc),
+                response_text=response_text,
+                exc_info=exc,
+                category="auth",
+            )
+            return None
         except Exception as exc:
             logger.error(
                 "gemini_token_refresh_failed",

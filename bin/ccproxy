@@ -1,0 +1,8 @@
+#!/bin/zsh
+
+set -euo pipefail
+
+SCRIPT_DIR=${0:A:h}
+PROJECT_ROOT=${SCRIPT_DIR:h}
+
+exec "${PROJECT_ROOT}/runtime/bin/python" "${PROJECT_ROOT}/scripts/ccproxy_local.py" "$@"

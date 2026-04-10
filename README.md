@@ -1,20 +1,46 @@
 # proxy
 
-Local fork of the current `ccproxy` runtime and package, isolated from future `uv tool` updates.
+Local fork of the current `ccproxy` runtime and package, isolated from future `uv tool` updates. The repo now owns local service management, Claude source switching, and shell entrypoints so you do not have to keep large wrappers in `~/.zshrc`.
 
 ## Layout
 
 - `ccproxy/`: active source tree copied from the currently working installation
 - `runtime/`: local copied runtime/venv used by the launcher, intentionally gitignored
-- `bin/ccproxy-local`: launcher that runs local source with the local runtime
-- `scripts/claude_source.py`: switch Claude Code between `codex`, `gemini`, and native Anthropic
+- `bin/ccproxy`: main local entrypoint; use this as the start point for service management, source switching, logs, doctor, and normal `serve`
+- `bin/ccproxy-local`: compatibility shim that forwards to `bin/ccproxy`
+- `scripts/ccproxy_local.py`: local management CLI implementation
+- `scripts/claude_source.py`: compatibility wrapper around `ccproxy source ...`
+
+## Recommended shell integration
+
+Keep `~/.zshrc` minimal and let the repo own the behavior:
+
+```bash
+export CCPROXY_PROJECT_ROOT="$HOME/mycodelibrary/proxy"
+unalias ccproxy 2>/dev/null
+ccproxy() {
+  command "${CCPROXY_PROJECT_ROOT}/bin/ccproxy" "$@"
+}
+```
 
 ## Common commands
 
 ```bash
-~/mycodelibrary/proxy/bin/ccproxy-local serve --host 127.0.0.1 --port 18112 --auth-token ccproxy-local-token
-python3 ~/mycodelibrary/proxy/scripts/claude_source.py codex
-python3 ~/mycodelibrary/proxy/scripts/claude_source.py gemini
-python3 ~/mycodelibrary/proxy/scripts/claude_source.py native
-python3 ~/mycodelibrary/proxy/scripts/claude_source.py show
+ccproxy doctor
+ccproxy source show
+ccproxy source use codex
+ccproxy source use gemini
+ccproxy source use native
+ccproxy settings show
+ccproxy settings set --port 18112 --upstream-proxy-url http://127.0.0.1:7897
+ccproxy service status
+ccproxy service restart
+ccproxy service logs -f
+ccproxy serve
 ```
+
+## Notes
+
+- `ccproxy service ...` will manage the LaunchAgent plist and log paths for you.
+- `ccproxy source use ...` updates `~/.claude/settings.json`; restart Claude Code after switching.
+- `ccproxy serve` still forwards to the upstream local `ccproxy` CLI and auto-fills host, port, auth token, and proxy defaults.

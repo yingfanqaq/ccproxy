@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import glob
 import os
 import re
+import shutil
 from pathlib import Path
 
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -30,6 +32,14 @@ _GEMINI_CLIENT_ID_PATTERNS = (
 _GEMINI_CLIENT_SECRET_PATTERNS = (
     re.compile(r'client_secret=([A-Za-z0-9._-]+)'),
     re.compile(r'"client_secret"\s*:\s*"([A-Za-z0-9._-]+)"'),
+)
+_GEMINI_CLI_CLIENT_ID_PATTERNS = (
+    re.compile(
+        r'\bOAUTH_CLIENT_ID\b\s*=\s*"([A-Za-z0-9._-]+\.apps\.googleusercontent\.com)"'
+    ),
+)
+_GEMINI_CLI_CLIENT_SECRET_PATTERNS = (
+    re.compile(r'\bOAUTH_CLIENT_SECRET\b\s*=\s*"([A-Za-z0-9._-]+)"'),
 )
 DEFAULT_GEMINI_OAUTH_SCOPES = [
     "https://www.googleapis.com/auth/cloud-platform",
@@ -79,7 +89,57 @@ def _iter_local_gemini_candidate_files() -> list[Path]:
     return candidates
 
 
+def _iter_installed_gemini_cli_files() -> list[Path]:
+    binary_candidates: list[Path] = []
+    resolved_candidates: list[Path] = []
+
+    which_binary = shutil.which("gemini")
+    if which_binary:
+        binary_candidates.append(Path(which_binary))
+
+    common_patterns = [
+        Path.home() / ".nvm" / "versions" / "node" / "*" / "bin" / "gemini",
+        Path.home() / ".local" / "bin" / "gemini",
+        Path("/opt/homebrew/bin/gemini"),
+        Path("/usr/local/bin/gemini"),
+    ]
+    for pattern in common_patterns:
+        matches = (
+            [pattern]
+            if "*" not in str(pattern)
+            else [Path(path) for path in sorted(glob.glob(str(pattern)))]
+        )
+        for candidate in matches:
+            if candidate.exists():
+                binary_candidates.append(candidate)
+
+    seen_paths: set[Path] = set()
+    for candidate in binary_candidates:
+        try:
+            resolved = candidate.resolve()
+        except Exception:
+            resolved = candidate
+        if resolved not in seen_paths and resolved.exists():
+            resolved_candidates.append(resolved)
+            seen_paths.add(resolved)
+
+    candidates: list[Path] = []
+    for resolved in resolved_candidates:
+        bundle_dir = resolved.parent
+        if resolved.is_file():
+            candidates.append(resolved)
+        if bundle_dir.exists():
+            for path in sorted(bundle_dir.glob("*.js")):
+                if path.is_file():
+                    candidates.append(path)
+    return candidates
+
+
 def discover_local_gemini_oauth_client_id() -> str | None:
+    for path in _iter_installed_gemini_cli_files():
+        value = _read_first_regex_match(path, _GEMINI_CLI_CLIENT_ID_PATTERNS)
+        if value:
+            return value
     for path in _iter_local_gemini_candidate_files():
         value = _read_first_regex_match(path, _GEMINI_CLIENT_ID_PATTERNS)
         if value:
@@ -88,6 +148,10 @@ def discover_local_gemini_oauth_client_id() -> str | None:
 
 
 def discover_local_gemini_oauth_client_secret() -> str | None:
+    for path in _iter_installed_gemini_cli_files():
+        value = _read_first_regex_match(path, _GEMINI_CLI_CLIENT_SECRET_PATTERNS)
+        if value:
+            return value
     for path in _iter_local_gemini_candidate_files():
         value = _read_first_regex_match(path, _GEMINI_CLIENT_SECRET_PATTERNS)
         if value:
@@ -230,4 +294,3 @@ class GeminiConfig(ProviderConfig):
 
     def resolve_accounts_path(self) -> Path:
         return Path(self.oauth_accounts_path).expanduser()
-

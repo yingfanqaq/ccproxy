@@ -60,6 +60,40 @@ def _ensure_text(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False)
 
 
+def _sanitize_schema_for_gemini(value: Any) -> Any:
+    """Strip JSON-Schema-only metadata that Gemini Code Assist rejects."""
+
+    if isinstance(value, Mapping):
+        sanitized: dict[str, Any] = {}
+        for key, nested_value in value.items():
+            if not isinstance(key, str):
+                continue
+            if key.startswith("$"):
+                continue
+            if key in {
+                "strict",
+                "additionalProperties",
+                "unevaluatedProperties",
+                "patternProperties",
+                "definitions",
+                "$defs",
+                "examples",
+                "default",
+                "title",
+                "readOnly",
+                "writeOnly",
+                "deprecated",
+            }:
+                continue
+            sanitized[key] = _sanitize_schema_for_gemini(nested_value)
+        return sanitized
+
+    if isinstance(value, list):
+        return [_sanitize_schema_for_gemini(item) for item in value]
+
+    return value
+
+
 def _content_parts_from_openai(content: Any) -> list[dict[str, Any]]:
     parts: list[dict[str, Any]] = []
 
@@ -133,7 +167,11 @@ def _function_declarations_from_tools(tools: Any) -> list[dict[str, Any]]:
             {
                 "name": name,
                 "description": _ensure_text(description) if description else "",
-                "parameters": parameters if isinstance(parameters, Mapping) else {},
+                "parameters": (
+                    _sanitize_schema_for_gemini(parameters)
+                    if isinstance(parameters, Mapping)
+                    else {}
+                ),
             }
         )
 
@@ -200,7 +238,9 @@ def _generation_config_from_openai(payload: Mapping[str, Any]) -> dict[str, Any]
             generation_config["responseMimeType"] = "application/json"
             schema = response_format.get("json_schema")
             if isinstance(schema, Mapping):
-                generation_config["responseSchema"] = dict(schema)
+                generation_config["responseSchema"] = _sanitize_schema_for_gemini(
+                    schema
+                )
 
     return generation_config
 
@@ -706,4 +746,3 @@ async def openai_chat_chunks_to_responses_events(
             yield event.model_dump(mode="json", exclude_none=True)
         elif isinstance(event, Mapping):
             yield dict(event)
-

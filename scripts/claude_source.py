@@ -1,60 +1,25 @@
 #!/usr/bin/env python3
-import argparse
-import json
+import subprocess
+import sys
 from pathlib import Path
 
 
-DEFAULT_PORT = 18112
-DEFAULT_TOKEN = "ccproxy-local-token"
-SETTINGS_PATH = Path.home() / ".claude" / "settings.json"
-
-
-def load_settings() -> dict:
-    return json.loads(SETTINGS_PATH.read_text())
-
-
-def save_settings(data: dict) -> None:
-    SETTINGS_PATH.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n")
-
-
-def show_settings(data: dict) -> None:
-    env = data.get("env", {})
-    print("ANTHROPIC_BASE_URL =", env.get("ANTHROPIC_BASE_URL"))
-    print("ANTHROPIC_AUTH_TOKEN =", env.get("ANTHROPIC_AUTH_TOKEN"))
-    print("model =", data.get("model"))
-
-
-def apply_mode(mode: str, port: int) -> None:
-    data = load_settings()
-    env = data.setdefault("env", {})
-
-    if mode == "native":
-        env.pop("ANTHROPIC_BASE_URL", None)
-        env.pop("ANTHROPIC_AUTH_TOKEN", None)
-        save_settings(data)
-        print("Claude source -> native Anthropic API")
-        print("Note: this requires your real ANTHROPIC_API_KEY to be available separately.")
-        return
-
-    env["ANTHROPIC_BASE_URL"] = f"http://127.0.0.1:{port}/{mode}"
-    env["ANTHROPIC_AUTH_TOKEN"] = DEFAULT_TOKEN
-    save_settings(data)
-    print(f"Claude source -> {mode} @ http://127.0.0.1:{port}/{mode}")
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+TARGET = PROJECT_ROOT / "scripts" / "ccproxy_local.py"
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Switch Claude Code upstream source.")
-    parser.add_argument("mode", choices=["codex", "gemini", "native", "show"])
-    parser.add_argument("--port", type=int, default=DEFAULT_PORT)
-    args = parser.parse_args()
+    if len(sys.argv) < 2:
+        print("Usage: claude_source.py <codex|gemini|native|show> [--port PORT]", file=sys.stderr)
+        return 1
 
-    if args.mode == "show":
-        show_settings(load_settings())
-        return 0
-
-    apply_mode(args.mode, args.port)
-    show_settings(load_settings())
-    return 0
+    mode = sys.argv[1]
+    extra = sys.argv[2:]
+    if mode == "show":
+        command = [sys.executable, str(TARGET), "source", "show", *extra]
+    else:
+        command = [sys.executable, str(TARGET), "source", "use", mode, *extra]
+    return subprocess.run(command, check=False).returncode
 
 
 if __name__ == "__main__":
