@@ -60,6 +60,17 @@ def _ensure_text(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False)
 
 
+def _tool_signature_fingerprint(name: Any, args: Any) -> str | None:
+    if not isinstance(name, str) or not name:
+        return None
+
+    try:
+        args_json = json.dumps(args if args is not None else {}, ensure_ascii=False, sort_keys=True)
+    except Exception:
+        args_json = _ensure_text(args)
+    return f"fp:{name}:{args_json}"
+
+
 def _sanitize_schema_for_gemini(value: Any) -> Any:
     """Strip JSON-Schema-only metadata that Gemini Code Assist rejects."""
 
@@ -304,6 +315,12 @@ def openai_chat_to_code_assist_request(
                             "args": dict(parsed_arguments),
                         }
                         thought_signature = resolved_signatures.get(str(tool_call_id))
+                        if not thought_signature:
+                            fingerprint = _tool_signature_fingerprint(name, parsed_arguments)
+                            if fingerprint:
+                                thought_signature = resolved_signatures.get(fingerprint)
+                        if not thought_signature:
+                            thought_signature = resolved_signatures.get(f"name:{name}")
                         if isinstance(thought_signature, str) and thought_signature:
                             function_call_payload["thoughtSignature"] = thought_signature
                         parts.append({"functionCall": function_call_payload})
@@ -471,6 +488,15 @@ def collect_tool_signatures_from_code_assist_payload(
             continue
         tool_call_id = _tool_call_id(response_id, index, function_call.get("id"))
         collected[tool_call_id] = thought_signature
+        raw_tool_call_id = function_call.get("id")
+        if isinstance(raw_tool_call_id, str) and raw_tool_call_id:
+            collected[raw_tool_call_id] = thought_signature
+        name = function_call.get("name")
+        if isinstance(name, str) and name:
+            collected[f"name:{name}"] = thought_signature
+            fingerprint = _tool_signature_fingerprint(name, function_call.get("args"))
+            if fingerprint:
+                collected[fingerprint] = thought_signature
 
     return collected
 

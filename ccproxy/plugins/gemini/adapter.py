@@ -168,6 +168,48 @@ class GeminiAdapter(BaseHTTPAdapter):
         for tool_call_id, signature in collect_tool_signatures_from_code_assist_payload(payload).items():
             self._tool_signature_cache[tool_call_id] = signature
 
+    def _log_missing_thought_signatures(
+        self, payload: Mapping[str, Any]
+    ) -> None:
+        request_payload = payload.get("request")
+        if not isinstance(request_payload, Mapping):
+            return
+        contents = request_payload.get("contents")
+        if not isinstance(contents, list):
+            return
+
+        missing: list[dict[str, Any]] = []
+        for content_index, content in enumerate(contents):
+            if not isinstance(content, Mapping):
+                continue
+            parts = content.get("parts")
+            if not isinstance(parts, list):
+                continue
+            for part_index, part in enumerate(parts):
+                if not isinstance(part, Mapping):
+                    continue
+                function_call = part.get("functionCall")
+                if not isinstance(function_call, Mapping):
+                    continue
+                if function_call.get("thoughtSignature"):
+                    continue
+                missing.append(
+                    {
+                        "content_index": content_index,
+                        "part_index": part_index,
+                        "id": function_call.get("id"),
+                        "name": function_call.get("name"),
+                    }
+                )
+
+        if missing:
+            logger.warning(
+                "gemini_request_missing_thought_signature",
+                total=len(missing),
+                missing=missing[:10],
+                category="transform",
+            )
+
     async def _streaming_json_payloads(
         self,
         response: httpx.Response,
@@ -678,6 +720,7 @@ class GeminiAdapter(BaseHTTPAdapter):
             session_id=session_id,
             thought_signatures=self._tool_signature_cache,
         )
+        self._log_missing_thought_signatures(code_assist_payload)
         body = json.dumps(code_assist_payload).encode()
 
         filtered_headers = filter_request_headers(headers, preserve_auth=False)
